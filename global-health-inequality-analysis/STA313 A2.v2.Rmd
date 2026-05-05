@@ -1,0 +1,511 @@
+---
+title: "Bridging the Gap - How Inequality and Treatment Access Shape Adolescent AIDS Outcomes"
+author: 'Ally Yeseo Shin, Daniel Hong'
+output:
+  html_document: default
+  pdf_document: default
+date: "2025-10-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Adolescent AIDS mortality remains one of the most pressing and persistent challenges in global public health. Despite decades of international investment and awareness campaigns, progress in reducing deaths among HIV-positive adolescents has stalled. Every year, thousands of young people between the ages of 10 and 19 die from AIDS-related causes—deaths that are largely preventable with timely diagnosis and effective treatment. Understanding why these deaths persist, and identifying which social, economic, and medical factors most strongly drive them, is essential for designing policies that can close the survival gap for future generations.
+
+According to UNAIDS, adolescents account for over 10% of all new HIV infections globally, yet they remain the only age group where AIDS-related deaths have not declined in recent years(UNAIDS 2023). This highlights the urgency of understanding why these deaths persist, and identifying which social, economic, and medical factors most strongly drive them, to design policies that can close the survival gap for future generations.
+
+This analysis draws on UNICEF’s State of the World’s Children 2024 Statistical Compendium, which provides comprehensive country-level data on adolescent HIV outcomes. Four dimensions are explored: (1) prevention and awareness levels, (2) ART treatment coverage and treatment gaps, (3) gender disparities in AIDS mortality, and (4) income inequality across nations. Each factor provides a distinct lens into how access, inequality, and behavior intersect to shape adolescent AIDS mortality outcomes.
+
+
+```{r}
+# Package
+library(readxl); library(dplyr); library(ggplot2); library(readr)
+
+# Common parser
+na_tokens <- c("NA","N/A","—","–","…","..",".","-","")
+clean_num <- function(x){
+  x <- trimws(as.character(x))
+  x <- sub("^<\\s*", "", x)                   # "<0.1" -> "0.1"
+  parse_number(x, na = na_tokens, locale = locale(grouping_mark = ","))
+}
+
+# Data loaders 
+load_epi <- function(){
+  suppressMessages(
+    read_excel("SOWC_tables.xlsx", sheet = 6, skip = 7, n_max = 217, na = na_tokens,
+               col_names = c("country",
+                             "among0-14_new_HIV_per1000","among15-19_new_HIV_per1000",
+                             "among15-19_new_HIV_per1000_female","among15-19_new_HIV_per1000_male",
+                             "among0-14_death_AIDS_per100000","among10-19_death_AIDS_per100000",
+                             "among10-19_death_AIDS_per100000_female","among10-19_death_AIDS_per100000_male",
+                             "among0-14_with_HIV","among10-19_with_HIV",
+                             "among10-19_with_HIV_female","among10-19_with_HIV_male")) |>
+      select(-starts_with("...")) |>
+      filter(!is.na(country), country != "SUMMARY") |>
+      mutate(across(-country, clean_num))
+  )
+}
+load_cover <- function(){
+  suppressMessages(
+    read_excel("SOWC_tables.xlsx", sheet = 7, skip = 7, n_max = 217, na = na_tokens,
+               col_names = c("country",
+                             "pregnent_with_HIV_PMTCT_perc","early_infant_HIV_perc",
+                             "among0-14_with_HIV_ART_perc","among10-19_with_HIV_ART_perc",
+                             "among15-19_know_HIV_2012-2023_male",NA,
+                             "among15-19_know_HIV_2012-2023_female",NA,
+                             "among15-19_use_condom_2012-2023_male",NA,
+                             "among15-19_use_condom_2012-2023_female",NA,
+                             "among15-19_tested_HIV_last_12m_perc_2012-2023_male",NA,
+                             "among15-19_tested_HIV_last_12m_perc_2012-2023_female",NA)) |>
+      select(-starts_with("...")) |>
+      filter(!is.na(country), country != "SUMMARY") |>
+      mutate(across(-country, clean_num))
+  )
+}
+load_adolescents <- function(){
+  suppressMessages(
+    read_excel("SOWC_tables.xlsx", sheet = 15, skip = 7, n_max = 217, na = na_tokens,
+               col_names = c("country",
+                             "population_thousands_10-19",NA,"population_prop_10-19",NA,
+                             "thinness_2022",NA,"overweight_2022",NA,
+                             "intimate_partner_violence_perc_2015-2022_female",NA,
+                             "bullying_perc_2011-2019_male",NA,"bullying_perc_2011-2019_female",NA,
+                             "proficiency_math_2014-2019_male",NA,"proficiency_math_2014-2019_female",NA,
+                             "proficiency_reading_2014-2019_male",NA,"proficiency_reading_2014-2019_female",NA,
+                             "not_school_employment_training_perc_2015-2023_male",NA,
+                             "not_school_employment_training_perc_2015-2023_female",NA,
+                             "unemployed_perc_2015-2023_male",NA,"unemployed_perc_2015-2023_female",NA,
+                             "household_chores_perc_2015-2023_male",NA,"household_chores_perc_2015-2023_female",NA)) |>
+      select(-starts_with("...")) |>
+      filter(!is.na(country), country != "SUMMARY") |>
+      mutate(across(-country, clean_num))
+  )
+}
+
+# Load data if not already loaded
+if (!exists("hiv_aids_epi"))   hiv_aids_epi   <- load_epi()
+if (!exists("hiv_aids_cover")) hiv_aids_cover <- load_cover()
+if (!exists("adolescents"))    adolescents    <- load_adolescents()
+```
+
+```{r build_df2, message=FALSE, warning=FALSE}
+library(dplyr); library(stringr); library(countrycode)
+
+df <- hiv_aids_epi %>%
+  select(
+    country,
+    aids_death       = `among10-19_death_AIDS_per100000`,
+    hiv_adolescents  = `among10-19_with_HIV`
+  ) %>%
+  inner_join(
+    hiv_aids_cover %>% select(country, art_cov = `among10-19_with_HIV_ART_perc`),
+    by = "country"
+  ) %>%
+  inner_join(
+    adolescents %>% select(country, youth_pop_thou = `population_thousands_10-19`),
+    by = "country"
+  ) %>%
+  mutate(
+    youth_pop     = youth_pop_thou * 1000,
+    treatment_gap = pmax(hiv_adolescents * (100 - art_cov) / 100, 0),
+    gap_per_100k  = if_else(youth_pop > 0, treatment_gap / youth_pop * 1e5, NA_real_)
+  )
+
+agg_pat <- paste0(
+  "(?i)",
+  "world|sub[- ]saharan africa|eastern and southern africa|",
+  "west and central africa|europe and central asia|",
+  "latin america|caribbean|east asia|pacific|",
+  "middle east|north africa|south asia|",
+  "eastern europe|western europe|northern europe|southern europe|",
+  "central asia|oceania|africa$|asia$|europe$|americas$"
+)
+
+custom_map <- c(
+  "Congo" = "Africa",
+  "State of Palestine" = "Asia",
+  "Taiwan" = "Asia",
+  "Viet Nam" = "Asia",
+  "Cabo Verde" = "Africa",
+  "Eswatini" = "Africa",
+  "Lao People's Democratic Republic" = "Asia"
+)
+
+df2 <- df %>%
+  filter(!stringr::str_detect(country, agg_pat)) %>%
+  mutate(
+    continent = countrycode(country, "country.name", "continent", custom_match = custom_map),
+    size_mill = youth_pop / 1e6
+  )
+
+df2$continent[is.na(df2$continent)] <- "Other/Unknown"
+```
+
+
+```{r}
+# Figure 1 ---------------------------------------------------------------
+prevention_vars <- hiv_aids_cover %>%
+  dplyr::transmute(
+    country,
+    know_m   = clean_num(`among15-19_know_HIV_2012-2023_male`),
+    know_f   = clean_num(`among15-19_know_HIV_2012-2023_female`),
+    condom_m = clean_num(`among15-19_use_condom_2012-2023_male`),
+    condom_f = clean_num(`among15-19_use_condom_2012-2023_female`),
+    test_m   = clean_num(`among15-19_tested_HIV_last_12m_perc_2012-2023_male`),
+    test_f   = clean_num(`among15-19_tested_HIV_last_12m_perc_2012-2023_female`)
+  ) %>%
+  dplyr::mutate(
+    knowledge_pct = rowMeans(cbind(know_m, know_f), na.rm = TRUE),
+    condom_pct    = rowMeans(cbind(condom_m, condom_f), na.rm = TRUE),
+    tested_pct    = rowMeans(cbind(test_m, test_f), na.rm = TRUE),
+    prevention_level_pct = rowMeans(cbind(knowledge_pct, condom_pct, tested_pct), na.rm = TRUE),
+    prevention_index_z   = as.numeric(scale(prevention_level_pct)) 
+  ) %>%
+  dplyr::select(country, prevention_level_pct, prevention_index_z)
+
+# Combine with df2
+df_prev <- df2 %>%
+  dplyr::inner_join(prevention_vars, by = "country") %>%
+  dplyr::filter(!is.na(aids_death), !is.na(prevention_index_z))
+
+# Create prevention-level groups
+df_prev_grouped <- df_prev %>%
+  dplyr::mutate(
+    prevention_group = dplyr::case_when(
+      prevention_index_z <= -0.5 ~ "Low",
+      prevention_index_z >=  0.5 ~ "High",
+      TRUE                        ~ "Medium"
+    ),
+    prevention_group = factor(prevention_group, levels = c("Low","Medium","High"))
+  ) %>%
+  dplyr::group_by(prevention_group) %>%
+  dplyr::summarise(
+    mean_mortality = mean(aids_death, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Simple bar chart
+p_prev_bar_neutral <- ggplot(df_prev_grouped,
+                             aes(x = prevention_group, y = mean_mortality, fill = prevention_group)) +
+  geom_col(alpha = 0.9, width = 0.65) +
+  scale_fill_brewer(palette = "RdYlGn", direction = -1) +
+  labs(
+    title = "Adolescent AIDS mortality by prevention & awareness group",
+    subtitle = "Groups based on prevention index (z-score thresholds: ≤ -0.5 = Low, ≥ 0.5 = High)\nBars show mean AIDS death rate per 100,000 (ages 10–19)",
+    x = "Prevention & awareness group",
+    y = "Mean AIDS death rate per 100,000 (ages 10–19)",
+    caption = "Source: UNICEF SOWC 2024"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "none")
+
+print(p_prev_bar_neutral)
+ggsave("A_prev_groups_vs_mortality_neutral.png", p_prev_bar_neutral, width = 9, height = 6, dpi = 320)
+```
+
+# The Awareness Paradox: When Knowledge Doesn’t Equal Safety
+
+At first glance, one might expect that countries with higher HIV awareness and prevention engagement—measured by an index that equally weights knowledge about HIV transmission, condom use, and testing rates—would exhibit lower AIDS mortality. However, the data reveal a counterintuitive pattern: countries that perform better on prevention and awareness indicators often experience higher adolescent AIDS mortality rates.
+
+To make these cross-country comparisons more interpretable, the prevention and awareness index was standardized using a z-score transformation. This approach expresses each country’s score in terms of standard deviations from the global average—so that a positive z-score represents stronger prevention engagement than the global average, while a negative score indicates weaker performance.
+
+This paradox is not evidence that awareness causes higher deaths, but rather that awareness responds to the epidemic. The countries most affected by HIV, such as those in Sub-Saharan Africa, have invested heavily in education campaigns, condom distribution, and testing programs precisely because of their higher infection and death rates. In short, awareness efforts are most concentrated where the crisis is most severe.
+
+This finding underscores a critical truth: knowledge is necessary but insufficient. Awareness campaigns improve understanding, but without sustained access to antiretroviral therapy (ART) and stable healthcare systems, information alone cannot prevent death. Awareness may grow in the shadow of crisis, but survival depends on infrastructure, not intention.
+
+In policy terms, this means global HIV strategies must evolve beyond prevention rhetoric. Governments and NGOs should channel resources toward the structural determinants of mortality—supply chain resilience, rural healthcare staffing, and consistent ART follow-up. Only by aligning education with access can awareness be translated into survival.
+
+
+```{r}
+# Figure 2 ---------------------------------------------------------------
+df <- hiv_aids_epi |>
+  select(country,
+         aids_death = `among10-19_death_AIDS_per100000`,
+         hiv_adolescents = `among10-19_with_HIV`) |>
+  inner_join(hiv_aids_cover |>
+               select(country, art_cov = `among10-19_with_HIV_ART_perc`),
+             by = "country") |>
+  inner_join(adolescents |>
+               select(country, youth_pop_thou = `population_thousands_10-19`),
+             by = "country") |>
+  mutate(
+    youth_pop = youth_pop_thou * 1000,
+    # Treatment gap (untreated count) = HIV-positive adolescents × (1 - ART coverage)
+    treatment_gap = pmax(hiv_adolescents * (100 - art_cov) / 100, 0),
+    gap_per_100k  = if_else(youth_pop > 0, treatment_gap / youth_pop * 1e5, NA_real_)
+  ) |>
+  filter(!is.na(gap_per_100k), !is.na(aids_death))
+
+library(countrycode); library(stringr); library(scales)
+
+# Remove regional/world aggregates
+agg_pat <- paste0(
+  "(?i)",                                   
+  "world|sub[- ]saharan africa|eastern and southern africa|",
+  "west and central africa|europe and central asia|",
+  "latin america|caribbean|east asia|pacific|",
+  "middle east|north africa|south asia|",
+  "eastern europe|western europe|northern europe|southern europe|",
+  "central asia|oceania|africa$|asia$|europe$|americas$"
+)
+
+df2 <- df %>%
+  filter(!str_detect(country, agg_pat))
+
+# Add manual continent corrections
+custom_map <- c(
+  "Congo" = "Africa",                
+  "State of Palestine" = "Asia",
+  "Taiwan" = "Asia",
+  "Viet Nam" = "Asia",          
+  "Cabo Verde" = "Africa",
+  "Eswatini" = "Africa",
+  "Lao People's Democratic Republic" = "Asia"
+)
+
+df2 <- df2 %>%
+  mutate(
+    continent = countrycode(country, "country.name", "continent",
+                            custom_match = custom_map),
+    size_mill = youth_pop / 1e6
+  )
+
+# Handle missing continent values
+df2$continent[is.na(df2$continent)] <- "Other/Unknown"
+
+# Visualization: Continent colors, population size, LOESS trend 
+p_clean <- ggplot(df2, aes(x = gap_per_100k, y = aids_death)) +
+  geom_point(aes(size = size_mill, color = continent), alpha = 0.75) +
+  geom_smooth(method = "loess", se = FALSE, color = "grey25", linewidth = 1) +
+  scale_x_continuous(
+    trans = "log1p",
+    labels = scales::label_number(accuracy = 1),
+    breaks = c(0,1,5,10,25,50,100,250,500,1000)
+  ) +
+  scale_size_area(max_size = 12, name = "Youth population\n(millions, 10–19)") +
+  scale_color_brewer(palette = "Set1", na.value = "black", name = "Continent") +
+  labs(
+    title = "Do larger adolescent ART treatment gaps correspond to higher AIDS mortality?",
+    subtitle = "Color = continent, size = youth population (10–19, millions)\nX: ART treatment gap per 100,000 (log1p)\nY: AIDS death rate per 100,000 (ages 10–19)",
+    x = "Adolescent ART treatment gap per 100,000 (log1p scale)",
+    y = "AIDS death rate among 10–19 (per 100,000)",
+    caption = "Source: UNICEF SOWC 2024\nTreatment gap = adolescents living with HIV × (1 - ART coverage)"
+  ) +
+  theme(
+    legend.position = "bottom",
+    legend.box      = "vertical",
+    legend.key.width  = grid::unit(12, "pt"),
+    legend.key.height = grid::unit(12, "pt"),
+    legend.spacing.x  = grid::unit(6, "pt")
+  ) +
+  guides(
+    size  = guide_legend(order = 1, override.aes = list(alpha = 1)),
+    color = guide_legend(order = 2, nrow = 1, byrow = TRUE, title.position = "top")
+  ) +
+  coord_cartesian(clip = "off")
+
+print(p_clean)
+```
+
+# The Treatment Gap: Where Access Defines Survival
+
+While prevention and education play a vital role in limiting new HIV infections, the most decisive factor in saving lives is treatment access. Antiretroviral therapy (ART) remains the global standard for managing HIV, suppressing viral replication, and preventing the immune system collapse that leads to AIDS-related death. Yet many countries—especially those in Sub-Saharan Africa—still struggle to deliver consistent ART to all adolescents who need it.
+
+In this analysis, the treatment gap is defined as the number of HIV-positive adolescents who are not receiving ART, standardized per 100,000 adolescents. Countries with larger treatment gaps consistently exhibit higher AIDS mortality rates among 10–19-year-olds. The visualization shows a clear upward trend: nations with wider ART treatment gaps face disproportionally higher mortality burdens, even when the data are log-transformed to account for skewness.
+
+This reveals the most fundamental inequality in the HIV response: awareness and education can slow transmission, but only treatment access saves lives. The barriers are often systemic—weak health infrastructure, medication shortages, or the financial incapacity of governments to sustain ART programs. Bridging this treatment divide remains the single most effective way to reduce adolescent AIDS deaths worldwide.
+
+
+```{r}
+# Figure 3 ---------------------------------------------------------------
+library(dplyr)
+library(ggplot2)
+
+df_gender <- hiv_aids_epi %>%
+  transmute(country,
+            death_f = `among10-19_death_AIDS_per100000_female`,
+            death_m = `among10-19_death_AIDS_per100000_male`) %>%
+  filter(!is.na(death_f), !is.na(death_m)) %>%
+  mutate(gap = death_f - death_m,
+         abs_gap = abs(gap))
+
+# Select top 15 countries by absolute gap
+df_gender_top <- df_gender %>%
+  slice_max(order_by = abs_gap, n = 15, with_ties = FALSE)
+
+# Dumbbell chart
+ggplot(df_gender_top,
+       aes(y = reorder(country, gap))) +
+  geom_segment(aes(x = death_m, xend = death_f, yend = country),
+               color = "grey70", linewidth = 0.7) +
+  geom_point(aes(x = death_m), size = 2.5, color = "#0072B2") +  
+  geom_point(aes(x = death_f), size = 2.5, color = "#D55E00") +  
+  labs(
+    title = "Gender disparity in adolescent AIDS mortality (ages 10–19)",
+    subtitle = "Top 15 countries with the largest absolute female–male mortality gap",
+    x = "AIDS death rate per 100,000",
+    y = NULL,
+    caption = "Blue = Male, Red = Female. Data: UNICEF SOWC 2024"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+# Gender Inequality: A Silent Crisis Behind the Numbers
+
+Beyond access, gender stands out as a defining axis of inequality in adolescent AIDS outcomes. Across most countries, female adolescents die at higher rates than their male counterparts. This disparity emerges from both biological and social factors: girls face higher susceptibility to infection, earlier sexual initiation, and lower negotiation power in relationships.
+
+In Sub-Saharan Africa, adolescent girls represent nearly 80% of all new HIV infections among youth (UNAIDS 2023). This regional imbalance highlights how gendered social structures and unequal access to healthcare amplify the risks faced by young women.
+
+The dumbbell chart visualizing the largest gender gaps in adolescent AIDS mortality illustrates this vividly—almost every line leans toward higher female death rates. Even in countries with relatively strong ART coverage, stigma, discrimination, and restricted reproductive health access prevent adolescent girls from receiving timely care.
+
+This gendered imbalance reveals an urgent policy challenge. HIV prevention and treatment programs must move beyond gender neutrality and directly confront the barriers young women face. Expanding reproductive health education, ensuring access to youth-friendly clinics, and empowering girls to participate in healthcare decisions are critical steps to closing this gender mortality gap.
+
+
+```{r}
+# Figure 4 ---------------------------------------------------------------
+
+need <- c("dplyr","countrycode","WDI")
+for(p in need){ if (!requireNamespace(p, quietly = TRUE)) install.packages(p) }
+library(dplyr); library(countrycode); library(WDI)
+
+# Ensure df2 exists
+if (!exists("df2")) stop("df2 must be created first before running this section.")
+
+# Get income classification from WDI metadata
+wb_countries <- WDI_data$country %>%
+  select(iso3c, country = country, income) %>%
+  filter(!is.na(iso3c), income != "")
+
+# Map country names to ISO3 codes (custom corrections)
+custom_map_iso3 <- c(
+  "Congo" = "COG",
+  "Democratic Republic of the Congo" = "COD", 
+  "Viet Nam" = "VNM",
+  "Cabo Verde" = "CPV",
+  "Eswatini" = "SWZ",
+  "Lao People's Democratic Republic" = "LAO",
+  "State of Palestine" = "PSE",
+  "Taiwan" = "TWN"
+)
+
+df2_iso <- df2 %>%
+  mutate(
+    iso3c = countrycode(country, "country.name", "iso3c",
+                        custom_match = custom_map_iso3, warn = FALSE)
+  )
+
+# Join with income group data
+df_gdp <- df2_iso %>%
+  left_join(wb_countries %>% select(iso3c, income_group = income), by = "iso3c") %>%
+  mutate(
+    income_group = dplyr::coalesce(
+      income_group,
+      c("Taiwan" = "High income",
+        "State of Palestine" = "Upper middle income")[country]
+    )
+  ) %>%
+  select(country, aids_death, income_group)
+
+# Check that both combined groups exist
+ok_n <- df_gdp %>%
+  filter(!is.na(income_group), !is.na(aids_death)) %>%
+  mutate(income2 = case_when(
+    income_group %in% c("High income","Upper middle income") ~ "High / Upper middle",
+    income_group %in% c("Lower middle income","Low income")  ~ "Low / Lower middle",
+    TRUE ~ NA_character_
+  )) %>%
+  filter(!is.na(income2)) %>%
+  count(income2, name = "n")
+
+if (nrow(ok_n) < 2 || any(ok_n$n == 0)) {
+  message("⚠️ Warning: One group may have insufficient data.\n",
+          capture.output(print(ok_n)))
+}
+
+
+library(dplyr)
+library(ggplot2)
+
+# Boxplot comparing income categories
+df_box <- df_gdp %>%
+  filter(!is.na(income_group), !is.na(aids_death)) %>%
+  mutate(
+    income2 = case_when(
+      income_group %in% c("High income", "Upper middle income") ~ "High / Upper middle",
+      income_group %in% c("Lower middle income", "Low income") ~ "Low / Lower middle",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(income2))
+
+# Original boxplot
+p_box <- ggplot(df_box, aes(x = income2, y = aids_death, fill = income2)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = 16, outlier.alpha = 0.6) +
+  scale_fill_brewer(palette = "Set2", name = "Income group (merged)") +
+  labs(
+    title = "Adolescent AIDS mortality by combined income group",
+    subtitle = "Countries grouped into two categories: High/Upper vs. Low/Lower income",
+    x = NULL,
+    y = "AIDS death rate (per 100,000, ages 10–19)",
+    caption = "UNICEF SOWC 2024; World Bank WDI"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "none"
+  )
+
+# Expanding y-axis range to 0-15 (outliers remain as points)
+p_box_zoom <- p_box +
+  coord_cartesian(ylim = c(0, 15)) +
+  labs(
+    subtitle = "Zoomed to main range (0–15 per 100,000) for better visibility",
+    caption = paste(
+      "UNICEF SOWC 2024; World Bank WDI.",
+      "Income groups follow World Bank FY2026 thresholds (GNI per capita, Atlas method, 2024 GNI):",
+      "Low ≤ $1,135; Lower-middle $1,136–$4,495; Upper-middle $4,496–$13,935; High > $13,935.",
+      "Merged here as High/Upper middle vs Low/Lower middle.",
+      sep = "\n"
+    )
+  )
+
+print(p_box_zoom)
+ggsave("AIDS_mortality_box_by_income2_zoomed.png",
+       p_box_zoom, width = 8, height = 5.5, dpi = 320)
+
+```
+
+# The Income Divide: Poverty as the Deepest Predictor
+
+When national income levels are compared with mortality data, the relationship becomes strikingly clear: adolescents in low- and lower-middle-income countries face far higher AIDS mortality rates than those in wealthier nations.The World Bank notes that 95% of adolescent AIDS deaths occur in low- and lower-middle-income countries, reflecting deep systemic inequities in healthcare capacity (World Bank 2023).
+
+The boxplot visualization exposes this divide. Low-income countries not only exhibit higher median mortality, but also far greater variation—reflecting fragile healthcare systems and inconsistent ART distribution. Conversely, high- and upper-middle-income nations maintain both lower and more stable death rates, illustrating how economic stability directly translates into health resilience.
+
+This finding exposes a deeper structural inequality. Poverty limits every stage of the care process—from diagnosis and transportation to nutrition and treatment adherence. When poverty intersects with gender and geography, it produces a compounding disadvantage that locks young people into cycles of vulnerability.
+
+Addressing this inequity requires targeted global action. International aid and funding mechanisms should prioritize equity-based interventions: expanding ART delivery networks, subsidizing treatment in low-income regions, and guaranteeing that humanitarian support flows toward the most affected countries. Reducing adolescent AIDS mortality is not only a matter of medicine; it is fundamentally a matter of justice and fair resource distribution.
+
+
+# Conclusion: Closing the Survival Gap
+The evidence across all dimensions points to one conclusion: adolescent AIDS mortality is driven less by individual behavior and more by structural inequality. Treatment access, gender disparity, and income inequality collectively shape the global landscape of survival.
+
+Awareness and prevention campaigns, while vital, cannot replace the tangible power of treatment and access. Suppose the global community aims to make meaningful progress. In that case, it must bridge the treatment gap—both medically and economically—by expanding ART coverage, empowering adolescent girls, and reinforcing public health systems in the world’s poorest regions.
+
+The lesson is simple yet profound: knowledge can inform, but only access can save.
+
+
+# Works Cited
+
+UNAIDS. The Path That Ends AIDS: Global AIDS Update 2023. UNAIDS, 13 July 2023, https://www.unaids.org/en/resources/documents/2023/global-aids-update-2023
+
+World Bank. World Development Indicators: Health and Gender Data (HIV Prevalence). World Bank, 2023,https://data.worldbank.org/indicator
+
+UNICEF. The State of the World’s Children 2024: For Every Child, Vaccination. UNICEF, 2024, https://data.unicef.org/resources/sowc-2024/
