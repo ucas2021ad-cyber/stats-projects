@@ -1,0 +1,53 @@
+---
+title: "STA305 A3"
+author: "Ally Shin"
+date: "2025-11-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## STA305 Assignment 3
+
+
+```{r}
+planes <- data.frame(
+  run = 1:20,
+  paper_type = c("thin","thin","thick","thick","thick",
+                 "thick","thin","thin","thick","thin",
+                 "thin","thick","thick","thick","thick",
+                 "thin","thin","thin","thin","thick"),
+  wing_shape = c("narrow","wide","narrow","narrow","narrow",
+                 "wide","wide","narrow","wide","narrow",
+                 "narrow","narrow","wide","wide","wide",
+                 "wide","wide","narrow","wide","narrow"),
+  distance_cm = c(270,303,270,301,276,
+                  338,309,297,323,263,
+                  257,298,339,325,366,
+                  315,304,221,326,277)
+)
+
+planes$paper_type <- factor(planes$paper_type,
+                            levels = c("thin","thick"))
+planes$wing_shape <- factor(planes$wing_shape,
+                            levels = c("narrow","wide"))
+
+# Two-way ANOVA
+fit <- aov(distance_cm ~ paper_type * wing_shape, data = planes)
+summary(fit)
+
+# Treatment means
+aggregate(distance_cm ~ paper_type + wing_shape,
+          data = planes,
+          FUN = function(x) c(mean = mean(x), sd = sd(x)))
+
+# Interaction plot
+with(planes,
+     interaction.plot(paper_type, wing_shape, distance_cm,
+                      xlab = "Paper type",
+                      ylab = "Mean distance (cm)",
+                      trace.label = "Wing shape"))
+```
+
