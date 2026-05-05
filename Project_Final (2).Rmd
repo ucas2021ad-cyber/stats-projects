@@ -1,0 +1,703 @@
+---
+title: "How do musical attributes impact the popularity of songs on Spotify from 2015 to the present?"
+author: 'Team Member: Jimin Lee, Ally shin, Hyeonsoo Shin'
+date: "28/11/2024"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+geometry: margin=0.5in
+urlcolor: blue
+---
+
+```{r, include=FALSE}
+# accesses the package where the data lives
+# accesses the package "dplyr"
+library(dplyr)
+# accesses the package "lubridate"
+library(lubridate)
+# accesses the package "knitr"
+library(knitr)
+
+# loads the dataset into R
+data <- read.csv("top_10000_1960-now.csv")
+
+# shows how many rows and columns are in the dataset
+dim(data)
+```
+
+```{r, include=FALSE}
+# Step 1: Removes all other variables that are not those we will use
+data_clean <- subset(as.data.frame(data), 
+                     select = c(Popularity, Mode, Danceability, Energy, Key, Loudness, Tempo, Valence, Acousticness, Track.Duration..ms., Album.Release.Date))
+
+# Step 2: Removes any row that contains a missing value
+data_clean <- data_clean[complete.cases(data_clean),]
+data_clean <- na.omit(data_clean)
+
+# Verify the cleaned data
+dim2 <-dim(data_clean)
+dim2
+
+# Step 3: Change Column name from "Track.Duration..ms." to "Duration"
+colnames(data_clean)[colnames(data_clean) == "Track.Duration..ms."] <- "Duration"
+
+# Step 4: Change the Variable "Mode" into factor with 2 levels
+data_clean$Mode <- ifelse(data_clean$Mode == 0, "Minor", "Major")
+data_clean$Mode <- factor(data_clean$Mode, levels = c("Minor", "Major"))
+data_clean$Mode <- factor(data_clean$Mode, levels = c("Minor", "Major"))
+
+# Step 5-1: Convert Album Release Date to year for rows with proper dates
+date_rows <- !is.na(ymd(data_clean$Album.Release.Date, quiet = TRUE))  # Check if it's a valid date
+
+# Step 5-2: Assign years to valid date rows
+data_clean$Album.Release.Year[date_rows] <- year(ymd(data_clean$Album.Release.Date[date_rows]))
+
+# Step 5-3: Handle rows that already have only the year (YYYY)
+# Extract rows where Album Release Date looks like a year (4-digit number)
+year_only_rows <- grepl("^\\d{4}$", data_clean$`Album.Release.Date`)
+
+# Step 5-4: Assign the year directly for those rows
+data_clean$Album.Release.Year[year_only_rows] <- as.numeric(data_clean$Album.Release.Date[year_only_rows])
+
+# Step 6: Subset data for albums released in 2015 or later with Popularity > 0
+# Omit 0 values of popularity prevents unnecessary variability and distort regression
+new <- subset(data_clean, Album.Release.Year >= 2015 & Popularity > 0 )
+
+# Check the results
+dim3 <-dim(new)
+dim3
+
+# Step 7: Make new subset data into csv file
+write.csv(new, "new_subset_data.csv", row.names = FALSE)
+```
+
+# 1. INTRODUCTION
+Customers' listening habits have evolved due to music streaming services like Spotify. By identifying specific musical attributes—such as mode(major or minor) and valence(positivity of songs)—the music industry can make their music align trendier for commercial success. The research question is: How do musical attributes—danceability, energy, key, loudness, acousticness, valence, tempo, mode, and duration—impact the popularity of songs on Spotify from 2015 to the present? The aim is to see how these factors correlate with commercial success.
+
+North and Krause (2024) investigated the distinctiveness of The Beatles’ music compared to others. They found that louder tracks with positive valence correlated with higher popularity (p. 133), highlighting the significance of emotional and dynamic features. Marlia et al. (2024) further examined Spotify charts from the 2010s and concluded that tracks with high energy, danceability, and loudness dominated the charts (p. 595-596), emphasizing the role of vibrant musical qualities. Finally, Kozbelt and Burger-Pianko (2007) analyzed Schubert’s lieder and noted that songs in a major mode were generally more popular, while longer songs were less favored (p. 197). These studies demonstrate how musical elements shape listener preferences and underscore the relevance of this research.
+
+Linear regression is a suitable statistical tool for this study because it allows us to quantify the average impact of each musical attribute on song popularity while accounting for the presence of other predictors. Also, the **Figure 1** indicates that the response variable meets key assumptions for linear regression, including normality and sufficient variability. Focusing on interpretability rather than prediction, we aim to understand how different musical elements contribute to commercial success.
+
+
+
+```{r fig1, fig.height=4, fig.width=7, fig.align='center', echo=FALSE, fig.cap="Boxplot and histogram of the response variable, Popularity. The boxplot shows the distribution of the response variable, while the histogram provides an overview of its frequency distribution."}
+
+# Response variable: Popularity
+par(mfrow=c(1,2))  # Arrange plots in 1 row and 2 columns
+boxplot(new$Popularity, main = "Popularity", ylab = "Popularity")
+hist(new$Popularity, main = "Histogram of Popularity", xlab = "Popularity")
+```
+
+
+# 2. METHOD
+
+## 2.1. Initial Model Construction and Diagnostics
+Fit a multiple linear regression model using all predictors. Assess mean response condition by plotting the response variable against fitted values for systematic patterns. Verify mean predictor condition by creating pairwise predictor scatterplots to identify non-linear relationships. If conditions are met, assess model assumptions by examining residuals versus fitted values and predictors scatterplots. Identify clustering, fanning, or patterns indicating violations of uncorrelated errors, constant variance, or linearity. Check normality by evaluating Q-Q plot deviations. If assumptions are violated, apply transformations (e.g., logarithmic, square root, power, Box-Cox) to improve linearity, variance, or normality.
+
+
+
+## 2.2. Hypothesis Testing for Model Significance
+Once assumptions are satisfied, conduct an ANOVA test to evaluate the overall model significance. The null hypothesis states that all predictors collectively have no effect, while the alternative states that at least one predictor is significant. If the p-value is less than 0.05 or the F-statistic exceeds the critical value, the result indicates at least one predictor significantly influences the response variable, Popularity. If the null hypothesis is not rejected, reconsider the choice of predictors and explore others in the dataset.
+
+
+## 2.3. T-tests for Individual Coefficients
+Perform t-tests to evaluate the significance of each predictor. The null hypothesis assumes no effect, while the alternative suggests a significant linear relationship on Popularity. Predictors with a p-value below 0.05 are considered statistically significant; others are classified as non-significant predictors.
+
+
+## 2.4 Refinement Using Partial F-Test
+To refine the model, conduct a partial F-test to assess the impact of excluding non-significant predictors identified in the t-tests. Construct a reduced model excluding these predictors and test it against the full model. The null hypothesis assumes that excluded predictors collectively have no effect, while the alternative suggests at least one excluded predictor affects the Popularity. If the p-value is below 0.05 or the F-statistic exceeds the critical value, reject the null hypothesis and recheck the significant predictors. By Iteratively dropping the least significant predictors, perform partial F-tests until arriving at the most significant model. The reduced model is preferred when the model fails to reject the null hypothesis.
+
+
+## 2.5 Model Selection and Diagnostics
+Evaluate the final model based on goodness-of-fit metrics, such as adjusted R², AIC, corrected AIC, and BIC. Prefer models have larger adjusted R² and smaller AIC, corrected AIC, and BIC values. Compare the full model and reduced models to identify the best-fitting option. 
+
+## 2.6 Final Validation
+Use hypothesis tests and goodness-of-fit criteria to select the final model that best answers the research question. Reassess assumptions and check multicollinearity using variance inflation factors (VIF), ensuring all predictors have VIF values below 5. If the assumption is violated, go to step 1 and apply the appropriate transformation. Address severe multicollinearity by removing collinear predictors and rechecking assumptions. Identify influential points using Cook’s distance, leverage, and other cutoff metrics. This ensures the final model adheres to statistical best practices.
+
+**Figure 2** illustrates the overall model selection process, providing a comprehensive overview of the steps involved in identifying the optimal regression model.
+
+```{r fig2, echo=FALSE, out.width="80%", fig.align='center', fig.cap="A flowchart summarizing the model selection process, including assumption check, hypothesis test, predictor transformation, model refinement, model selection, and validation to identify the final model."}
+knitr::include_graphics("method flowchart.png")
+
+```
+
+
+\newpage
+# 3. RESULT
+
+## 3.1. Fit a preliminary model
+
+We began by fitting a multiple linear regression model with the following predictors: Mode, Energy, Danceability, Key, Loudness, Tempo, Valence (Positivity), Acousticness, and Duration. The response variable was Spotify's Popularity index.
+
+```{r, fig.height=3.5, fig.width=5, echo = FALSE, include=FALSE}
+# Starting model
+model <- lm(Popularity ~ Mode + Energy + Danceability + Key + Loudness + Tempo + Valence + Acousticness + Duration ,data = new)
+
+# Summary of 9 predictor model
+summary(model)
+```
+
+## 3.2. Check the conditions and assumptions
+
+We checked two conditions before using residual plots. First, the response vs. fitted scatter plot showed no non-linear trends, with random patterns scattered around the linear line despite minor variance. Second, pairwise scatter plots of predictors revealed no notable curves or non-linear patterns. Therefore, conditions for mean response and mean predictor were satisfied, allowing us to proceed with residual diagnostics.
+
+```{r, fig.height=3.5, fig.width=3.5, echo = TRUE, fig.align='center',include=FALSE}
+# Condition 1: Popularity vs Fitted
+
+y_value <- resid(model)
+x_value <- fitted(model)
+
+plot(x=x_value, y=new$Popularity, main="Popularity vs Fitted",
+     xlab="Fitted", ylab="Popularity")
+abline(a = 0, b = 1, lty=2, col="red")
+```
+
+```{r, fig.height=5, fig.width=5, echo = FALSE, fig.align='center', include=FALSE}
+# Condition 2: Pairwise scatter plot
+pairs(new[, c(2, 3, 4, 5, 6, 7, 8, 9, 10)])
+```
+
+From **Figure 3**, Residual vs. fitted scatterplots showed randomness, supporting linearity, uncorrelated errors, and constant variance assumptions. However, the bounded nature of the popularity index (0–100) caused a minor linear trend. Residual vs. predictor plots revealed left-skewness in Duration and slight right-skewness in Energy and Danceability. To address these, we applied power transformations. From **Figure 3**, the normal Q-Q plot showed slight tail deviations, suggesting mild normality issues, prompting further transformations to improve the fit. From **Figure 4** in appendix, mode residual box plots appeared symmetric and evenly spread across categories, satisfying assumptions for categorical predictors.
+
+
+
+```{r fig3, fig.height=3.5, fig.width=7, echo = FALSE, fig.align='center', fig.cap="Residual vs. Fitted and Normal Q-Q Plots: Residual plots support linearity, uncorrelated errors, and constant variance, despite minor trends due to bounded popularity. Slight normality issues and predictor skewness will be addressed with power transformations."}
+par(mfrow=c(1,2))
+
+# Residual vs Fitted plot
+plot(x = x_value, y = y_value, main="Residual vs Fitted", xlab="Fitted",
+     ylab="Residuals")
+
+# Normal Q-Q plot 
+qqnorm(y_value)
+qqline(y_value)
+
+```
+
+
+```{r, fig.height=4.5, fig.width=5.5, echo = FALSE, fig.align='center', include=FALSE}
+# Residual vs Numerical Predictor Scatterplot 
+
+par(mfrow=c(2,2))
+
+plot(x = new$Energy, y = y_value, main="Residual vs Energy",
+     xlab="Energy", ylab="Residual")
+plot(x = new$Danceability, y = y_value, main="Residual vs Danceability",
+     xlab="Danceability", ylab="Residual")
+plot(x = new$Valence, y = y_value, main="Residual vs Valence",
+     xlab="Valence", ylab="Residual")
+plot(x = new$Duration, y = y_value, main="Residual vs Duration",
+     xlab="Duration", ylab="Residual")
+plot(x = new$Duration, y = y_value, main="Residual vs Loudness",
+     xlab="Loudness", ylab="Residual")
+plot(x = new$Duration, y = y_value, main="Residual vs Tempo",
+     xlab="Tempo", ylab="Residual")
+plot(x = new$Duration, y = y_value, main="Residual vs Key",
+     xlab="Key", ylab="Residual")
+plot(x = new$Duration, y = y_value, main="Residual vs Acousticness",
+     xlab="Acousticness", ylab="Residual")
+```
+
+
+```{r, fig.height=3.5, fig.width=4.5, echo = FALSE, fig.align='center', include=FALSE}
+# Residual vs Categorical Predictor Box plot
+
+boxplot(y_value ~ new$Mode , main="Residual vs Mode",
+        xlab="Mode", ylab="Residuals")
+```
+
+
+## 3.3. Transformations
+
+We transformed predictors based on Box-Cox power estimates to assess the normality of numerical predictors. As we see **Table 1**, Duration and Tempo were log-transformed, while Danceability, Energy, Valence, and Acousticness were power-transformed to fractions 8/5, 7/5, 3/4, and 1/2, respectively. We determined not to transform the response variable since the 95% confidence interval for the maximum likelihood estimate(MLE) of the Popularity overlaps around 1. 
+
+
+```{r, echo = FALSE, fig.align='center', include=F}
+# apply boxCox() 
+
+####################################
+### uncomment, run, comment again###
+#install.packages("car")
+library(car)
+boxCox(model)
+####################################
+```
+
+```{r, echo = FALSE, fig.align='center', include=F}
+# run Box-Cox on predictors
+####################################
+### uncomment, run, comment again###
+summary(powerTransform(cbind(new[,c(1,3, 4, 7, 8, 9, 10)])))
+####################################
+
+# replace NULL with transformation of each variable based on powerTransform
+bcDanceability <- new$Danceability^(8/5)
+bcEnergy <- new$Energy^(7/5)
+lnTempo <- log(new$Tempo)
+bcValence <- new$Valence^(3/4)
+bcAcousticness <-new$Acousticness^(1/2)
+lnDuration <- log(new$Duration)
+
+#Loudness, Key have 0 values, so we could not use the power transformation
+
+```
+
+```{r, echo = FALSE, fig.align='center', include=F}
+transformed <- lm(Popularity ~ Mode + bcEnergy + bcDanceability + Key + Loudness + lnTempo + bcValence + bcAcousticness + lnDuration ,data = new)
+
+y_value2 <- resid(transformed)
+x_value2 <- fitted(transformed) 
+
+# residual vs fitted plot
+plot(x = x_value2, y = y_value2, main="Residual vs Fitted", xlab="Fitted",
+     ylab="Residuals")
+```
+
+```{r, echo = FALSE, include=T}
+# Data frame 
+transformation_table <- data.frame(
+  Variables = c("Danceability", "Energy", "Tempo", "Valence", "Acousticness", "Duration"),
+  `Rounded Power` = c(1.65, 1.42, 0.00, 0.76, 0.28, 0.00),
+  `Transformed Variables` = c("Danceability^8/5", 
+                               "Energy^7/5", 
+                               "ln(Tempo)", 
+                               "Valence^3/4", 
+                               "Acousticness^1/2", 
+                               "ln(Duration)")
+)
+
+# kable 
+library(knitr)
+kable(
+  transformation_table,
+  align = "c",
+  col.names = c("Variables", "Rounded Power", "Transformed Variables"),
+  caption = "Table: Summary of Power Transformations"
+)
+```
+
+
+## 3.4. ANOVA Test for Overall Significance
+
+We performed an ANOVA test, where the null hypothesis stated that no predictors significantly impact the response. The F-statistic was 17.91, exceeding the critical value of 2.219 (p < 0.05), leading us to reject the null and conclude that at least one predictor significantly impacts popularity.
+
+```{r, echo = FALSE, include=F}
+# Transformed model
+transformed <- lm(Popularity ~ Mode + bcEnergy + bcDanceability + Key + Loudness + lnTempo + bcValence + bcAcousticness + lnDuration ,data = new)
+
+# Summary 
+summary(transformed)
+
+# critical value of F
+Fstat1 <- 17.91
+qf(0.95, 5, 1645)
+# 2.219 < 17.91
+# Reject null and conclude significant linear relationship exists for at least one predictor.
+```
+
+## 3.5. T-Test for Individual Predictors
+
+We conducted a t-test for individual predictors by using the confidence interval with 95% confidence interval. The results showed that Mode, Key, power-transformed Energy (bcEnergy), power-transformed Acousticness (bcAcousticness), and log-transformed Tempo (lnTempo) were statistically insignificant, as their confidence intervals included zero. These predictors were potential candidates for removal.
+
+```{r, echo = FALSE, include=F}
+# Find Confidence interval for each coefficient
+confint(transformed)
+# Mode, bcEnergy, Key, lnTempo, and bcAcousticness variables includes 0 in the interval, which means insignificant.
+# bcDanceability, Loudness, bcValence, lnduration variables do not include 0, which means significant.
+```
+
+## 3.6. Partial F-tests for subsets of model
+
+To refine the model, we performed a Partial F-test. The reduced model (excluding insignificant predictors) yielded an F-statistic of 1.55 (p = 0.1852), indicating that the excluded predictors did not significantly improve the model. 
+
+```{r, echo = FALSE, include=F}
+# Fit reduced model without insignificant predictors
+reduced1 <- lm(Popularity ~ bcDanceability + Loudness + bcEnergy + bcValence + lnDuration, data = new)
+
+# Conduct a partial F test
+anova(reduced1, transformed)
+
+# F statistic and p-value
+Fstat2 <- 1.5502
+pvalue <- 0.1852
+
+# F value is not significant (p-value = 0.1852 > 0.05). 
+# The reduced model is preferable because the additional predictors do not provide a significant improvement.
+```
+
+
+We checked the summary values of the reduced model, but we found that the power-transformed Energy(bcEnergy) predictor was not statistically significant. We further removed bcEnergy and created a second reduced model (reduced2). Comparing reduced1 and reduced2 using another Partial F-test, we obtained p = 0.2427, confirming that bcEnergy could be dropped without impacting fit.
+
+
+```{r, echo = FALSE, include=F}
+# Summary of reduced1 model
+summary(reduced1)
+# power-transformed Energy(bcEnergy) predictor was not statistically significant due to the high p-value(0.2427)
+
+# Construct reduced2 model by dropping "bcEnergy" from reduced1 model
+reduced2 <- lm(Popularity ~ bcDanceability + Loudness + bcValence + lnDuration, data = new)
+
+# conduct a partial F test
+anova(reduced2, transformed)
+
+# F statistics and p-value
+Fstat3 <- 1.5137
+pvalue3 <- 0.1823
+
+# F value is not significant (p-value = 0.1823 > 0.05). 
+# The reduced2 model is preferable because the bcEnergy predictor do not provide a significant improvement.
+```
+
+
+## 3.7 Goodness-of-Fit Comparison
+
+We compared the transformed, reduced1, and reduced2 models. As we see **Table 2**, the Reduced2 model demonstrates the best performance. It has the lowest AIC values, both for the traditional AIC (10458.825) and the AIC adjusted for model complexity (10458.876). Additionally, its adjusted R-squared value (0.083) is nearly identical to the other models, confirming its efficiency without over fitting.
+
+```{r, echo = FALSE, include=T}
+# 3 model from all possible subsets
+transformed <- lm(Popularity ~ Mode + bcEnergy + bcDanceability + Key + Loudness + lnTempo + bcValence + bcAcousticness + lnDuration ,data = new)
+reduced1 <- lm(Popularity ~ bcDanceability + Loudness + bcEnergy + bcValence + lnDuration, data = new)
+reduced2 <- lm(Popularity ~ bcDanceability + Loudness + bcValence + lnDuration, data = new)
+
+# Calculate criteria for transformed model
+p_transformed = length(coef(transformed)) - 1
+n_transformed = nrow(new)
+criteria_transformed <- round(cbind(
+  Adj_R_Squared = summary(transformed)$adj.r.squared,
+  AIC_k2 = extractAIC(transformed, k = 2)[2],
+  AIC_klogn = extractAIC(transformed, k = log(n_transformed))[2],
+  AIC_adjusted = extractAIC(transformed, k = 2)[2] + (2 * (p_transformed + 2) * (p_transformed + 3) / (n_transformed - p_transformed - 1))
+), 3)
+
+# Calculate criteria for reduced1 model
+p_reduced1 = length(coef(reduced1)) - 1
+n_reduced1 = nrow(new)
+criteria_reduced1 <- round(cbind(
+  Adj_R_Squared = summary(reduced1)$adj.r.squared,
+  AIC_k2 = extractAIC(reduced1, k = 2)[2],
+  AIC_klogn = extractAIC(reduced1, k = log(n_reduced1))[2],
+  AIC_adjusted = extractAIC(reduced1, k = 2)[2] + (2 * (p_reduced1 + 2) * (p_reduced1 + 3) / (n_reduced1 - p_reduced1 - 1))
+), 3)
+
+# Calculate criteria for reduced2 model
+p_reduced2 = length(coef(reduced2)) - 1
+n_reduced2 = nrow(new)
+criteria_reduced2 <- round(cbind(
+  Adj_R_Squared = summary(reduced2)$adj.r.squared,
+  AIC_k2 = extractAIC(reduced2, k = 2)[2],
+  AIC_klogn = extractAIC(reduced2, k = log(n_reduced2))[2],
+  AIC_adjusted = extractAIC(reduced2, k = 2)[2] + (2 * (p_reduced2 + 2) * (p_reduced2 + 3) / (n_reduced2 - p_reduced2 - 1))
+), 3)
+
+# Combine all results into one data frame
+criteria_all <- rbind(
+  cbind(Model = "Transformed", criteria_transformed),
+  cbind(Model = "Reduced1", criteria_reduced1),
+  cbind(Model = "Reduced2", criteria_reduced2)
+)
+
+# Create a kable table
+library(knitr)
+kable(criteria_all, caption = "Goodness-of-Fit Comparison Criteria", col.names = c("Model", "Adjusted R-Squared", "AIC", "BIC", "Corrected AIC"), align = "c", format = "markdown")
+
+
+```
+
+## 3.8. Final Validation
+
+### 3.8.1 Adressing Multicollinearity using VIF.
+
+Regarding multicollinearity, we found that all variance inflation factors (VIFs) are greater than 1 but less than 5, indicating that no severe multicollinearity is present. 
+
+```{r, echo = FALSE, include=F}
+# Summary of selected reduced2 model
+summary(reduced2)
+
+# 8% variation in Popularity explained by model
+R_squared <- 0.08524
+Adjusted_R_squared <- 0.08302 
+
+# Addressing Multicollinearity
+vif(reduced2)
+# Every predictors are larger than 1 but smaller than 5, means not severe multicollinearity exist.
+```
+
+### 3.8.2. Recheck the assumptions of this model
+
+As we see **Figure 5** in appendix, we observed improvements in the skewness of residual plots for transformed Energy and transformed Danceability predictors. Furthermore, no other violating patterns were observed in the residual plots or the pairwise scatterplots for the transformed predictors.
+
+```{r, fig.height=6, fig.width=6, echo = FALSE, include=F}
+y_value <- resid(reduced2)
+x_value <- fitted(reduced2) 
+
+# residual vs fitted plot
+plot(x = x_value, y = y_value, main="Residual vs Fitted", xlab="Fitted",
+     ylab="Residuals")
+
+# use this command to plot these in a single grid
+par(mfrow=c(3,2))
+
+plot(x = new$Loudness, y = y_value, main="Residual vs Loudness",
+     xlab="Loudness", ylab="Residual")
+plot(x = bcDanceability, y = y_value, main="Residual vs bcDanceability",
+     xlab="bcDanceability", ylab="Residual")
+plot(x = bcValence, y = y_value, main="Residual vs bcValence",
+     xlab="bcValence", ylab="Residual")
+plot(x = lnDuration, y = y_value, main="Residual vs ln(Duration)",
+     xlab="lnDuration", ylab="Residual")
+
+par(mfrow=c(1,1))
+
+# use qqnorm() and qqline() with residuals to display QQ plot
+qqnorm(y_value)
+qqline(y_value)
+
+par(mfrow=c(1,1))
+plot(x=x_value, y=new$Popularity, main="Popularity vs Fitted",
+     xlab="Fitted", ylab="Popularity")
+abline(a = 0, b = 1, lty=2, col="red")
+
+new$bcDanceability <- bcDanceability
+new$bcValence <- bcValence
+new$lnDuration <- lnDuration
+
+pairs(
+  new[, c("bcDanceability", "Loudness", "bcValence", "lnDuration")],
+  main = "Pairwise Scatterplots of Transformed Variables",
+  pch = 19)
+
+```
+
+
+### 3.8.3. Potential Problematic Observations
+
+We checked the leverage points, outlier points, and 3 potential influential points(cook’s distance, DFFITS, and DFBETA). As we see **Table 3** in the appendix, observation 675 showed the highest leverage(0.023) but minimal impact. Outliers like 1099 and 1287 displayed residuals (-2.8) below extreme thresholds (|r_i| > 4). Cook’s Distance flagged no points, and DFFITS identified 1099 as having localized influence but no substantial skew on the model. These points did not compromise overall validity.
+
+
+```{r, fig.height=6, fig.width=6, echo = FALSE, include=F}
+n <- nrow(new)
+p <- length(coef(reduced2))-1
+
+# Leverage points
+h_ii <- hatvalues(reduced2)
+hcut <- 2*(p+1)/n
+leverage_points <- which(h_ii > hcut)
+leverage_values <- h_ii[leverage_points]
+leverage_summary <- data.frame(
+  Observation = leverage_points,
+  Leverage = leverage_values
+)
+top_leverage <- leverage_summary[order(-leverage_summary$Leverage), ] # Sort by leverage values
+
+# Outlier points (standardized residuals)
+r_i <- rstandard(reduced2)
+outlier_points <- which(abs(r_i) > 2)
+outlier_values <- r_i[outlier_points]
+outlier_summary <- data.frame(
+  Observation = outlier_points,
+  Standardized_Residual = outlier_values
+)
+top_outliers <- outlier_summary[order(-abs(outlier_summary$Standardized_Residual)), ] # Sort by residual magnitude
+
+# Influential points (Cook's distance)
+D_i <- cooks.distance(reduced2)
+cookcut <- qf(0.5, p+1, n-p-1)
+influential_cook_points <- which(D_i > cookcut)
+cook_values <- D_i[influential_cook_points]
+cook_summary <- data.frame(
+  Observation = influential_cook_points,
+  Cook_Distance = cook_values
+)
+top_cook <- cook_summary[order(-cook_summary$Cook_Distance), ] # Sort by Cook's distance
+
+# Influential points (DFFITS)
+dffits_i <- dffits(reduced2)
+fitcut <- 2 * sqrt((p + 1) / n)
+influential_dffits_points <- which(abs(dffits_i) > fitcut)
+dffits_values <- dffits_i[influential_dffits_points]
+dffits_summary <- data.frame(
+  Observation = influential_dffits_points,
+  DFFITS = dffits_values
+)
+top_dffits <- dffits_summary[order(-abs(dffits_summary$DFFITS)), ] # Sort by DFFITS magnitude
+
+# Influential points (DFBETAS)
+dfbetas_i <- dfbetas(reduced2)
+betacut <- 2 / sqrt(n)
+influential_dfbeta_summary <- list()
+for (i in 1:ncol(dfbetas_i)) {
+  dfbeta_points <- which(abs(dfbetas_i[, i]) > betacut)
+  dfbeta_values <- dfbetas_i[dfbeta_points, i]
+  dfbeta_summary <- data.frame(
+    Observation = dfbeta_points,
+    DFBETAS = dfbeta_values
+  )
+  influential_dfbeta_summary[[paste0("Beta_", i - 1)]] <- dfbeta_summary
+}
+
+# Example: Access influential points for Beta_1
+top_dfbeta_beta1 <- influential_dfbeta_summary[["Beta_1"]][order(-abs(influential_dfbeta_summary[["Beta_1"]]$DFBETAS)), ] # Sort by DFBETAS magnitude for Beta_1
+
+# Print summaries
+cat("Top Leverage Points:\n")
+print(head(top_leverage, 10)) # Top 10 leverage points
+cat("\nTop Outliers:\n")
+print(head(top_outliers, 10)) # Top 10 outliers
+cat("\nTop Influential Points (Cook's Distance):\n")
+print(head(top_cook, 10)) # Top 10 Cook's distance
+cat("\nTop Influential Points (DFFITS):\n")
+print(head(top_dffits, 10)) # Top 10 DFFITS
+cat("\nTop Influential Points (DFBETAS for Beta_1):\n")
+print(head(top_dfbeta_beta1, 10)) # Top 10 DFBETAS for Beta_1
+
+# Count the number of problematic points for each criterion
+n_leverage <- length(leverage_points)
+n_outliers <- length(outlier_points)
+n_cook <- length(influential_cook_points)
+n_dffits <- length(influential_dffits_points)
+
+# Get all problematic points for DFBETAS across predictors
+dfbeta_all_points <- unlist(lapply(influential_dfbeta_summary, function(df) df$Observation))
+# Find unique problematic points across all DFBETAS
+unique_dfbeta_points <- unique(dfbeta_all_points)
+# Count unique problematic points for DFBETAS
+total_dfbeta <- length(unique_dfbeta_points)
+
+# Create a summary table
+criteria_summary <- data.frame(
+  Criterion = c("Leverage", "Outliers", "Cook's Distance", "DFFITS", "DFBETAS"),
+  Total_Problematic_Points = c(n_leverage, n_outliers, n_cook, n_dffits, total_dfbeta)
+)
+
+# Print the summary table
+print(criteria_summary)
+
+```
+
+```{r,echo = FALSE, include=F}
+# Create a summary table using kable
+criteria_summary <- data.frame(
+  Criterion = c("Leverage", "Outliers", "Cook's Distance", "DFFITS", "DFBETAS"),
+  Total_Problematic_Points = c(n_leverage, n_outliers, n_cook, n_dffits, total_dfbeta)
+)
+
+# Print the table using kable
+kable(criteria_summary, caption = "Summary of Problematic Points by Criterion", 
+      col.names = c("Criterion", "Total Problematic Points"), 
+      align = "c", 
+      format = "markdown")
+```
+
+## 3.9. Final Model Selection
+In conclusion, the final model includes Popularity as the response variable and four predictors: transformed Danceability, Loudness, transformed Valence, and log-transformed Duration. 
+
+
+# 4. CONCLUSION AND LIMITATIONS
+
+The research question, "How do musical attributes—danceability, energy, key, loudness, acousticness, valence, tempo, mode, and duration—impact the popularity of songs on Spotify from 2015 to the present?" has been addressed through the proposed linear regression model. The final model reveals that specific attributes, such as danceability, loudness, valence, and duration, significantly influence a song's popularity. Specifically, a one-unit increase in bcDanceability(Danceability^(8/5)) predicts a 32.18 average increase in popularity, while loudness and lnDuration (log(Duration)) contribute 2.21 and 8.80 increases, respectively, and bcValence(Valence^(3/4)) decreases popularity by 22.34 per unit on average.
+
+This model highlights how attributes like danceability, loudness, valence, and duration shape a song's popularity on modern Spotify. Quantifying each predictor's effect while accounting for others, provides valuable insights for artists and producers to tailor music to audience preferences and maximize commercial success.
+
+The findings are largely consistent with the literature, as the positive effects of danceability and loudness on popularity align with Marlia et al. (2024) and North and Krause (2024). However, the negative relationship between valence and popularity contrasts with prior studies by North and Krause (2024), suggesting modern audiences may prefer emotionally intense tracks. Additionally, the positive influence of duration on popularity diverges from Kozbelt and Burger-Pianko’s (2007) findings, which may be attributed to the studies’ specific focus on Schubert’s lieder, a distinct musical genre.
+
+The model has several limitations. First, the low R-squared value indicates that the predictors explain only a small portion of the variation in song popularity, suggesting unmeasured factors like marketing or social trends may play a significant role. Second, popularity scores of 0 were omitted from the dataset to avoid skewing results, but this exclusion could introduce bias by ignoring songs that failed to gain any traction on Spotify. Third, outliers may have influenced results. Referring to **Table 3**, while the maximum leverage(0.023) is low and Cook’s distance flagged no points, observations 1099 and 1344, identified by outlier metrics, show localized influence without significantly compromising model fit. Also, the model slightly violates the normality assumption due to the left-skewness of popularity data. This may lead to distorted p-values, affecting the model’s accuracy.
+
+
+# 5. ETHICS DISCUSSION
+
+Manual selection methods, such as t-tests and partial F-tests, were chosen to identify the coefficients in the model because they allow for a more thorough understanding of the data’s context and the relationships between variables which are of critical interest to the research question. By manually testing each variable, we could directly evaluate its significance and ensure that the final model is both interpretable and meaningful. While automated selection methods (e.g., stepwise, forward, backward) are efficient, they may overlook key contextual factors or include irrelevant variables, potentially reducing the model's reliability.
+
+
+Automated methods were avoided because they rely purely on algorithmic criteria, which can neglect the broader research context and lead to misleading results. For instance, an important predictor such as Mode is excluded due to their correlation with other variables, or an insignificant predictor such as Loudness is retained without proper evaluation. Manual selection allows us to leverage both statistical evidence and domain expertise, ensuring a model that aligns with the research objectives.
+
+
+From an ethical standpoint, avoiding automated selection reflects a commitment to trustworthiness and responsibility. Relying solely on automated methods could be seen as neglecting due diligence, potentially leading to blameworthiness if the analysis produces flawed or misleading outcomes. Manual selection fosters accountability, ensuring that each decision is deliberate and justified. Moreover, it aligns with the virtues of wisdom and propriety by prioritizing informed, thoughtful actions over convenience. This approach cultivates trust in the analysis and promotes ethical statistical practice which makes the manual model not just practical but also ethically justified. 
+
+## DESCRIPTION OF CONTRIBUTION
+
+*Jimin Lee*: Contributed to the methods and results sections and was responsible for all R coding tasks. 
+
+*Hyeonsoo Shin*: Wrote the results and ethics sections, and designed and finalized the poster.
+
+*Ally Shin*: Authored the introduction and conclusion sections, and edited the introduction essay as part of the demonstration process.
+
+\newpage
+# 6. BIBLIOGRAPHY
+
+Arvidsson, J., & Sptify API. (2023, October 3). Top 10000 Songs on Spotify 1960-Now. https://www.kaggle.com/datasets/joebeachcapital/top-10000-spotify-songs-1960-now/data 
+
+Kozbelt, A., & Burger-Pianko, Z. (2007). Words, music, and other measures: Predicting the repertoire   popularity of 597 schubert lieder. Psychology of Aesthetics, Creativity, and the Arts, 1(4), 191-203. doi:https://doi.org/10.1037/1931-3896.1.4.191
+
+
+Marlia, S., Setiawan, K., & Juliane, C. (2024). Analysis of Music Features and Song Popularity Trends on Spotify Using K-Means and CRISP-DM. Sistemasi: Jurnal Sistem Informasi (Online), 13(2), 595–607. https://doi.org/10.32520/stmsi.v13i2.3757
+
+North, A. C., & Krause, A. E. (2024). Are The Beatles Different? A Computerized Psychological Analysis of Their Music. Empirical Musicology Review, 18(2), 133–147. https://doi.org/10.18061/emr.v18i2.9178
+
+ 
+
+# Appendix 
+
+```{r fig4, fig.height=3.5, fig.width=4.5, echo = FALSE, fig.align='center', fig.cap="A residual vs. mode box plot checks assumptions for the categorical predictor (Mode), ensuring residuals have consistent variability across mode levels."}
+boxplot(y_value ~ new$Mode , main="Residual vs Mode",
+        xlab="Mode", ylab="Residuals")
+```
+
+
+```{r fig5, fig.height=6, fig.width=9, echo = FALSE, fig.align='center', fig.cap="Residual vs. Predictor Variables (Transformed vs. Untransformed): Scatterplots comparing residuals against predictors in both transformed and untransformed forms, highlighting the improved alignment with model assumptions after transformations."}
+
+par(mfrow=c(3,4))
+plot(resid(model) ~ new$Energy, main="Residual vs Energy")
+plot(resid(transformed)~ bcEnergy, main= "Energy Transformed")
+plot(resid(model) ~ new$Danceability, main="Residual vs Danceability")
+plot(resid(transformed)~bcDanceability, main= "Danceability Transformed")
+plot(resid(model) ~ new$Valence, main="Residual vs Valence")
+plot(resid(transformed)~ bcValence, main="Valence Transformed")
+plot(resid(model) ~ new$Acousticness, main="Residual vs Acousticness")
+plot(resid(transformed)~ bcAcousticness, main="Acousticness Transformed")
+plot(resid(model) ~ new$Tempo, main="Residual vs Tempo")
+plot(resid(transformed)~ lnTempo, main="Tempo Transformed")
+plot(resid(model) ~ new$Duration, main="Residual vs Duration")
+plot(resid(transformed)~ lnDuration, main="Duration Transformed")
+
+```
+
+```{r, echo = FALSE, fig.align='center'}
+# Combine observation and value into one column
+leverage_data <- data.frame(
+  Leverage = paste(top_leverage$Observation[1:10], 
+                   "(", round(top_leverage$Leverage[1:10], 3), ")", sep = "")
+)
+
+outlier_data <- data.frame(
+  Outliers = paste(top_outliers$Observation[1:10], 
+                   "(", round(top_outliers$Standardized_Residual[1:10], 3), ")", sep = "")
+)
+
+dffits_data <- data.frame(
+  DFFITS = paste(top_dffits$Observation[1:10], 
+                 "(", round(top_dffits$DFFITS[1:10], 3), ")", sep = "")
+)
+
+dfbeta_data <- data.frame(
+  DFBETAS = paste(unlist(lapply(influential_dfbeta_summary, function(df) df$Observation))[1:10],
+                  "(", round(unlist(lapply(influential_dfbeta_summary, function(df) df$DFBETAS))[1:10], 3), 
+                  ")", sep = "")
+)
+
+# Combine all data into one table
+combined_table <- data.frame(
+  Leverage = leverage_data$Leverage,
+  Outliers = outlier_data$Outliers,
+  DFFITS = dffits_data$DFFITS,
+  DFBETAS = dfbeta_data$DFBETAS
+)
+
+kable(combined_table, 
+      align = "c", 
+      col.names = c("Leverage", "Outliers", "DFFITS", "DFBETAS"), 
+      caption = "Top 10 Problematic observations for Each Criterion in Reduced2 Model: Datapoint number(criteria value)")
+ 
+ 
+```
+
